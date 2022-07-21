@@ -23,27 +23,16 @@
 #  You should have received a copy of the GNU General Public License along with
 #  this program; if not, write to the Free Software Foundation, Inc., 51
 #  Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
-#
-#  Demo for showing streamed JPEG images from the AI-deck example.
-#
-#  By default this demo connects to the IP of the AI-deck example when in
-#  Access point mode.
-#
-#  The demo works by opening a socket to the AI-deck, downloads a stream of
-#  JPEG images and looks for start/end-of-frame for the streamed JPEG images.
-#  Once an image has been fully downloaded it's rendered in the UI.
-#
-#  Note that the demo firmware is continously streaming JPEG files so a single
-#  JPEG image is taken from the stream using the JPEG start-of-frame (0xFF 0xD8)
-#  and the end-of-frame (0xFF 0xD9).
-
 
 
 ###================================
+# Originally taken from the Bitcraze AIDeck GAP8 examples: https://github.com/bitcraze/aideck-gap8-examples
+
 # Modified by Miguel Granero. 2022
 #   - ROS Package created
 #   - Modification to functionality to adapt it to a better ros usage
 #   - Image publisher
+#   - Color correction
 ###================================
 
 
@@ -59,6 +48,9 @@ from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 
 class aideckPublisher(Node):
+    '''
+    Class for the publisher
+    '''
     def __init__(self):
         super().__init__('aideck_stream_publisher')
 
@@ -87,19 +79,44 @@ class aideckPublisher(Node):
         self.start = time.time()
         self.count = 0
 
+    def colorCorrectBayer(self,img):
+        '''
+        Color correction for the RGB Camera. It has a sensor with a Bayer pattern, which has
+        more green cells than blue and red, so if the image is not treated, it will have  a
+        green-ish look.
+        '''
+        # TODO: Apply an actual color correction without luminosity loss. -> histogram level
+        # This is just an approximation
+        green = img[:,:,1]
+        green = np.floor(green*0.75) 
+        img[:,:,1] = green
+        return img
+
+    def rx_bytes(self,size, client_socket):
+        '''
+        Read N bytes from the socket
+        '''
+        data = bytearray()
+        while len(data) < size:
+            data.extend(client_socket.recv(size-len(data)))
+        return data
+
 
     def getImage(self, client_socket):
+        '''
+        Function to receive an image from the socket
+        '''
         imgdata = None
         data_buffer = bytearray()
         # First get the info
-        packetInfoRaw = rx_bytes(4, client_socket)
+        packetInfoRaw = self.rx_bytes(4, client_socket)
         #print(packetInfoRaw)
         [length, routing, function] = struct.unpack('<HBB', packetInfoRaw)
         #print("Length is {}".format(length))
         #print("Route is 0x{:02X}->0x{:02X}".format(routing & 0xF, routing >> 4))
         #print("Function is 0x{:02X}".format(function))
 
-        imgHeader = rx_bytes(length - 2, client_socket)
+        imgHeader = self.rx_bytes(length - 2, client_socket)
         #print(imgHeader)
         #print("Length of data is {}".format(len(imgHeader)))
         [magic, width, height, depth, format, size] = struct.unpack('<BHHBBI', imgHeader)
@@ -116,16 +133,18 @@ class aideckPublisher(Node):
             imgStream = bytearray()
 
             while len(imgStream) < size:
-                packetInfoRaw = rx_bytes(4, client_socket)
+                packetInfoRaw = self.rx_bytes(4, client_socket)
                 [length, dst, src] = struct.unpack('<HBB', packetInfoRaw)
                 #print("Chunk size is {} ({:02X}->{:02X})".format(length, src, dst))
-                chunk = rx_bytes(length - 2, client_socket)
+                chunk = self.rx_bytes(length - 2, client_socket)
                 imgStream.extend(chunk)
             
             self.count = self.count + 1
             meanTimePerImage = (time.time()-self.start) / self.count
-            print("{}".format(meanTimePerImage))
-            print("{}".format(1/meanTimePerImage))
+
+            # TODO: CHange to debug and rclpy
+            #print("{}".format(meanTimePerImage))
+            #print("{}".format(1/meanTimePerImage))
 
             if format == 0:
                 bayer_img = np.frombuffer(imgStream, dtype=np.uint8)   
@@ -154,23 +173,19 @@ class aideckPublisher(Node):
         return format,imgs
 
     def timer_callback(self):
+        '''
+        The class works with a timer. This is the main action in each loop.
+        '''
         msg = Image()
         format, imgs = self.getImage(self.client_socket)
 
         if imgs is not None:
             #self.get_logger().info('Publishing: "%s"' % self.i)
             img = imgs[-1]
-            msg = self.br.cv2_to_imgmsg(img)
+            msg = self.br.cv2_to_imgmsg(self.colorCorrectBayer(img))
 
             self.publisher_.publish(msg)
             self.i += 1
-
-
-def rx_bytes(size, client_socket):
-    data = bytearray()
-    while len(data) < size:
-        data.extend(client_socket.recv(size-len(data)))
-    return data
 
 
 
