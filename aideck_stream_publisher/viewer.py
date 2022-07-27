@@ -79,7 +79,7 @@ class aideckPublisher(Node):
         self.start = time.time()
         self.count = 0
 
-    def colorCorrectBayer(self,img):
+    def colorCorrectBayer(self,img_):
         '''
         Color correction for the RGB Camera. It has a sensor with a Bayer pattern, which has
         more green cells than blue and red, so if the image is not treated, it will have  a
@@ -87,8 +87,9 @@ class aideckPublisher(Node):
         '''
         # TODO: Apply an actual color correction without luminosity loss. -> histogram level
         # This is just an approximation
+        img = img_.copy()
         green = img[:,:,1]
-        green = np.floor(green*0.75) 
+        green = np.floor(green*0.8) 
         img[:,:,1] = green
         return img
 
@@ -149,14 +150,14 @@ class aideckPublisher(Node):
             if format == 0:
                 bayer_img = np.frombuffer(imgStream, dtype=np.uint8)   
                 bayer_img.shape = (244, 324)
-                color_img = cv2.cvtColor(bayer_img, cv2.COLOR_BayerBG2BGRA)
+                color_img = cv2.cvtColor(bayer_img, cv2.COLOR_BayerBG2BGR)
                 
                 if self.get_parameter('save_flag').value:
                     cv2.imwrite(f"stream_out/raw/img_{self.count:06d}.png", bayer_img)
                     cv2.imwrite(f"stream_out/debayer/img_{self.count:06d}.png", color_img)
                 if self.get_parameter('show_flag').value:
                     cv2.imshow('Raw', bayer_img)
-                    cv2.imshow('Color', color_img)
+                    cv2.imshow('Color', self.colorCorrectBayer(color_img))
                     cv2.waitKey(1)
                 imgs = [bayer_img,color_img]
             else:
@@ -179,7 +180,7 @@ class aideckPublisher(Node):
         msg = Image()
         format, imgs = self.getImage(self.client_socket)
 
-        if imgs is not None:
+        if imgs is not None and format == 0:
             #self.get_logger().info('Publishing: "%s"' % self.i)
             img = imgs[-1]
             msg = self.br.cv2_to_imgmsg(self.colorCorrectBayer(img))
