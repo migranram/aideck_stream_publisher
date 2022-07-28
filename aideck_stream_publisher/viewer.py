@@ -47,6 +47,21 @@ from rclpy.node import Node
 from sensor_msgs.msg import Image
 from cv_bridge import CvBridge
 
+def colorBalance(img):
+    '''
+    Function to color balance wrt a white object
+    '''
+    mean = [0,0,0]
+    factor = [1,1,1]
+    img_out = img.copy()
+    for c in range(3):
+        mean[c] = np.mean(img[:,:,c].flatten())
+        factor[c] = 255.0/mean[c]
+        img_out[:,:,c] = np.clip(img_out[:,:,c]*factor[c],0,255)
+
+    print("Factors: {}".format(factor))
+    return img_out, factor
+
 class aideckPublisher(Node):
     '''
     Class for the publisher
@@ -63,7 +78,8 @@ class aideckPublisher(Node):
         self.declare_parameter('save_flag',False)
         self.declare_parameter('show_flag',False)
         
-        
+        self.factors = [1.8648577393897736, 1.2606252586922309, 1.4528872589128194]
+
         self.publisher_ = self.create_publisher(Image, 'aideck/image', 10)
         timer_period = 0.1  # seconds
         self.timer = self.create_timer(timer_period, self.timer_callback)
@@ -79,7 +95,7 @@ class aideckPublisher(Node):
         self.start = time.time()
         self.count = 0
 
-    def colorCorrectBayer(self,img_):
+    def colorCorrectBayer(self,img_, factors=[1,1,1]):
         '''
         Color correction for the RGB Camera. It has a sensor with a Bayer pattern, which has
         more green cells than blue and red, so if the image is not treated, it will have  a
@@ -88,9 +104,8 @@ class aideckPublisher(Node):
         # TODO: Apply an actual color correction without luminosity loss. -> histogram level
         # This is just an approximation
         img = img_.copy()
-        green = img[:,:,1]
-        green = np.floor(green*0.8) 
-        img[:,:,1] = green
+        for i in range(3):
+            img[:,:,i] = np.clip(img[:,:,i]*factors[i],0,255)
         return img
 
     def rx_bytes(self,size, client_socket):
@@ -151,13 +166,17 @@ class aideckPublisher(Node):
                 bayer_img = np.frombuffer(imgStream, dtype=np.uint8)   
                 bayer_img.shape = (244, 324)
                 color_img = cv2.cvtColor(bayer_img, cv2.COLOR_BayerBG2BGR)
+
+                k = cv2.waitKey(1)
+                if k == ord('b'):
+                    _,self.factors = colorBalance(color_img)
                 
                 if self.get_parameter('save_flag').value:
                     cv2.imwrite(f"stream_out/raw/img_{self.count:06d}.png", bayer_img)
                     cv2.imwrite(f"stream_out/debayer/img_{self.count:06d}.png", color_img)
                 if self.get_parameter('show_flag').value:
                     cv2.imshow('Raw', bayer_img)
-                    cv2.imshow('Color', self.colorCorrectBayer(color_img))
+                    cv2.imshow('Color', self.colorCorrectBayer(color_img,self.factors))
                     cv2.waitKey(1)
                 imgs = [bayer_img,color_img]
             else:
@@ -183,7 +202,7 @@ class aideckPublisher(Node):
         if imgs is not None and format == 0:
             #self.get_logger().info('Publishing: "%s"' % self.i)
             img = imgs[-1]
-            msg = self.br.cv2_to_imgmsg(self.colorCorrectBayer(img))
+            msg = self.br.cv2_to_imgmsg(self.colorCorrectBayer(img,self.factors))
 
             self.publisher_.publish(msg)
             self.i += 1
