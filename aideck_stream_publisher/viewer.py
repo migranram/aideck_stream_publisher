@@ -203,7 +203,7 @@ class aideckPublisher(Node):
             #self.get_logger().info('Publishing: "%s"' % self.i)
             img = imgs[-1]
             msg = self.br.cv2_to_imgmsg(self.colorCorrectBayer(img,self.factors))
-
+            msg.header.stamp = self.get_clock().now().to_msg()
             self.publisher_.publish(msg)
             self.i += 1
 
