@@ -62,6 +62,21 @@ def colorBalance(img):
     print("Factors: {}".format(factor))
     return img_out, factor
 
+def colorBalanceStretch(img, perc = 0.05):
+    '''
+    Similar to the above, but only using min and max in the 0.05 percentile.
+    '''
+    factor = [1,1,1]
+    img_out = img.copy()
+    for c in range(3):
+        mi, ma = (np.percentile(img[:,:,c], perc), np.percentile(img[:,:,c],100.0-perc))
+        factor[c] = 255.0/(ma-mi)
+        img_out[:,:,c] = np.clip(img_out[:,:,c]*factor[c],0,255)
+
+    print("Factors: {}".format(factor))
+    return img_out, factor
+    
+
 class aideckPublisher(Node):
     '''
     Class for the publisher
